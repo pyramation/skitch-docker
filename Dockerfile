@@ -28,38 +28,11 @@ RUN perl Build.PL --quiet --install_base /app --etcdir /etc/sqitch \
     && find /app -name '*.pod' | grep -v sqitch | xargs rm -rf
 
 ################################################################################
-# Copy to the final image without all the build stuff.
-FROM debian:stable-slim AS sqitch
-
-# Install runtime system dependencies and remove unnecesary files.
-RUN mkdir -p /usr/share/man/man1 /usr/share/man/man7 \
-    && apt-get -qq update \
-    && apt-get -qq --no-install-recommends install less libperl5.24 perl-doc vim \
-       libpq5 postgresql-client \
-    && apt-cache pkgnames | grep python | xargs apt-get purge -qq \
-    && apt-cache pkgnames | grep libmagic | xargs apt-get purge -qq \
-    && apt-get clean \
-    && rm -rf /var/cache/apt/* /var/lib/apt/lists/* /usr/bin/mysql?* \
-    && rm -rf /plibs /man /usr/share/man /usr/share/doc /usr/share/postgresql \
-        /usr/share/vim /etc/vimrc \
-    && find / -name '*.pod' | grep -v sqitch | xargs rm -rf \
-    && find / -name '*.ph' -delete \
-    && find / -name '*.h' -delete 
-
-# Copy the app and config from the build image.
-COPY --from=sqitch-build /app .
-COPY --from=sqitch-build /etc/sqitch /etc/sqitch/
-
-# Set up environment, entrypoint, and default command.
-ENV LESS=-R LC_ALL=C.UTF-8 LANG=C.UTF-8 SQITCH_EDITOR=vim SQITCH_PAGER=less
-
-
-################################################################################
 # Build Node
+FROM debian:stable-slim AS node-build
 
 RUN apt-get -qq update \
     && apt-get -qq --no-install-recommends install gpg dirmngr
-
 
 RUN groupadd --gid 1000 node \
     && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
@@ -126,15 +99,45 @@ RUN set -ex \
     && ln -s /opt/yarn-v$YARN_VERSION/bin/yarnpkg /usr/local/bin/yarnpkg \
     && rm yarn-v$YARN_VERSION.tar.gz.asc yarn-v$YARN_VERSION.tar.gz
 
-
 ################################################################################
 # Install skitch
 
 RUN apt-get -qq update \
     && apt-get -qq --no-install-recommends install python make g++
 
-
 RUN mkdir -p /usr/local/lib/node_modules && chown -R node:node /usr/local/lib/node_modules
 RUN mkdir -p /usr/local/bin/ && chown -R node:node /usr/local/bin/
 USER node
 RUN npm install -g skitch
+
+################################################################################
+# Copy to the final image without all the build stuff.
+
+FROM debian:stable-slim AS skitch
+
+# Install runtime system dependencies and remove unnecesary files.
+RUN mkdir -p /usr/share/man/man1 /usr/share/man/man7 \
+    && apt-get -qq update \
+    && apt-get -qq --no-install-recommends install less libperl5.24 perl-doc vim \
+    libpq5 postgresql-client \
+    && apt-cache pkgnames | grep python | xargs apt-get purge -qq \
+    && apt-cache pkgnames | grep libmagic | xargs apt-get purge -qq \
+    && apt-get clean \
+    && rm -rf /var/cache/apt/* /var/lib/apt/lists/* /usr/bin/mysql?* \
+    && rm -rf /plibs /man /usr/share/man /usr/share/doc /usr/share/postgresql \
+    /usr/share/vim /etc/vimrc \
+    && find / -name '*.pod' | grep -v sqitch | xargs rm -rf \
+    && find / -name '*.ph' -delete \
+    && find / -name '*.h' -delete 
+
+# Copy the app and config from the build image.
+COPY --from=sqitch-build /app .
+COPY --from=sqitch-build /etc/sqitch /etc/sqitch/
+COPY --from=node-build /usr/local /usr/local
+
+ENV LESS=-R LC_ALL=C.UTF-8 LANG=C.UTF-8 SQITCH_EDITOR=vim SQITCH_PAGER=less
+
+RUN groupadd --gid 1000 node \
+    && useradd --uid 1000 --gid node --shell /bin/bash --create-home node
+
+USER node
